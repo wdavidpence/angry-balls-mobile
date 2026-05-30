@@ -301,12 +301,267 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script></script>
 <script>
 /* ============================================================
    ANGRY BALLS - UPGRADED EDITION
    Single-file Phaser 3 + Matter.js + Web Audio
    ============================================================ */
+
+/* ============================================================
+   SECTION 2 — CONSTANTS & GAME DATA
+   ============================================================ */
+const GAME_W = 1280;
+const GAME_H = 720;
+const GROUND_Y = 640;
+const SLINGSHOT_X = 180;
+const SLINGSHOT_Y = 560;
+const SLINGSHOT_TOP = 510;
+const MAX_PULL = 140;
+const LAUNCH_POWER = 0.22;
+
+const MAT = {
+  WOOD:  { hp: 80,  color: 0xb07a3a, dark: 0x6f4a1f, density: 0.0012, restitution: 0.2, friction: 0.6, type: 'wood' },
+  STONE: { hp: 200, color: 0x9aa0a6, dark: 0x55595f, density: 0.0028, restitution: 0.15, friction: 0.8, type: 'stone' },
+  GLASS: { hp: 30,  color: 0x9ee6ff, dark: 0x4ea3c4, density: 0.0010, restitution: 0.4, friction: 0.3, type: 'glass' },
+  METAL: { hp: 400, color: 0xdde2e9, dark: 0x7d8694, density: 0.0040, restitution: 0.5, friction: 0.5, type: 'metal' },
+  TNT:   { hp: 40,  color: 0xff7733, dark: 0x9a3a10, density: 0.0014, restitution: 0.2, friction: 0.6, type: 'tnt' }
+};
+
+const PIG_RADIUS = 22;
+
+const BIRD_TYPES = {
+  red:    { name: 'Classic', radius: 22, density: 0.0028, restitution: 0.40, power: 1.00, damage: 1.00, color: 0xe74c3c, label: '' },
+  heavy:  { name: 'Crusher', radius: 27, density: 0.0044, restitution: 0.22, power: 0.86, damage: 1.75, color: 0x555555, label: 'H' },
+  speedy: { name: 'Comet',   radius: 18, density: 0.0019, restitution: 0.55, power: 1.25, damage: 0.90, color: 0xff7f11, label: 'S' }
+};
+
+// Level definitions. Each block: [x,y,w,h,mat]. Each pig: [x,y].
+const LEVELS = [
+  { // 1 First Flight
+    name: 'First Flight', birds: 3, birdTypes: ['red','red','heavy'],
+    pigs: [[1000, GROUND_Y - PIG_RADIUS]],
+    blocks: [
+      [970, GROUND_Y - 30, 20, 60, 'WOOD'],
+      [1030, GROUND_Y - 30, 20, 60, 'WOOD'],
+      [1000, GROUND_Y - 70, 80, 20, 'WOOD']
+    ]
+  },
+  { // 2 Double Trouble
+    name: 'Double Trouble', birds: 3, birdTypes: ['red','speedy','heavy'],
+    pigs: [[900, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS]],
+    blocks: [
+      [870, GROUND_Y - 30, 18, 60, 'WOOD'], [930, GROUND_Y - 30, 18, 60, 'WOOD'],
+      [900, GROUND_Y - 70, 80, 18, 'WOOD'],
+      [1050, GROUND_Y - 30, 18, 60, 'WOOD'], [1110, GROUND_Y - 30, 18, 60, 'WOOD'],
+      [1080, GROUND_Y - 70, 80, 18, 'WOOD']
+    ]
+  },
+  { // 3 Glass House
+    name: 'Glass House', birds: 3, birdTypes: ['speedy','red','heavy'],
+    pigs: [[1000, GROUND_Y - PIG_RADIUS], [1000, GROUND_Y - 110]],
+    blocks: [
+      [950, GROUND_Y - 40, 18, 80, 'GLASS'], [1050, GROUND_Y - 40, 18, 80, 'GLASS'],
+      [1000, GROUND_Y - 90, 120, 18, 'GLASS'],
+      [950, GROUND_Y - 140, 18, 80, 'GLASS'], [1050, GROUND_Y - 140, 18, 80, 'GLASS'],
+      [1000, GROUND_Y - 190, 120, 18, 'GLASS'],
+      [1000, GROUND_Y - 220, 100, 18, 'WOOD']
+    ]
+  },
+  { // 4 Stone Fortress
+    name: 'Stone Fortress', birds: 4, birdTypes: ['heavy','heavy','red','speedy'],
+    pigs: [[1000, GROUND_Y - PIG_RADIUS], [1090, GROUND_Y - PIG_RADIUS], [1000, GROUND_Y - 130]],
+    blocks: [
+      [950, GROUND_Y - 50, 30, 100, 'STONE'],
+      [1050, GROUND_Y - 50, 30, 100, 'STONE'],
+      [1140, GROUND_Y - 50, 30, 100, 'STONE'],
+      [1000, GROUND_Y - 110, 130, 20, 'STONE'],
+      [1095, GROUND_Y - 110, 110, 20, 'STONE']
+    ]
+  },
+  { // 5 Mixed Materials
+    name: 'Mixed Materials', birds: 4, birdTypes: ['red','speedy','heavy','red'],
+    pigs: [[960, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1020, GROUND_Y - 170]],
+    blocks: [
+      [950, GROUND_Y - 25, 200, 30, 'STONE'],
+      [880, GROUND_Y - 85, 18, 80, 'WOOD'], [1020, GROUND_Y - 85, 18, 80, 'WOOD'],
+      [950, GROUND_Y - 130, 200, 18, 'WOOD'],
+      [950, GROUND_Y - 160, 40, 40, 'TNT'],
+      [1020, GROUND_Y - 200, 60, 60, 'GLASS']
+    ]
+  },
+  { // 6 Sky Castle
+    name: 'Sky Castle', birds: 4, birdTypes: ['speedy','red','heavy','speedy'],
+    pigs: [[900, GROUND_Y - PIG_RADIUS], [1050, GROUND_Y - 170], [1150, GROUND_Y - 290], [950, GROUND_Y - 290]],
+    blocks: [
+      [880, GROUND_Y - 30, 18, 60, 'WOOD'], [940, GROUND_Y - 30, 18, 60, 'WOOD'],
+      [910, GROUND_Y - 70, 80, 18, 'WOOD'],
+      [1050, GROUND_Y - 145, 200, 22, 'STONE'],
+      [970, GROUND_Y - 195, 18, 80, 'WOOD'], [1130, GROUND_Y - 195, 18, 80, 'WOOD'],
+      [1050, GROUND_Y - 240, 200, 18, 'WOOD'],
+      [950, GROUND_Y - 320, 18, 60, 'GLASS'], [1150, GROUND_Y - 320, 18, 60, 'GLASS'],
+      [1050, GROUND_Y - 360, 250, 18, 'METAL']
+    ]
+  },
+  { // 7 Mine Chaos
+    name: 'Mine Chaos', birds: 4, birdTypes: ['red','heavy','speedy','heavy'],
+    pigs: [[940, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1010, GROUND_Y - 180]],
+    blocks: [
+      [880, GROUND_Y - 30, 20, 60, 'WOOD'], [1000, GROUND_Y - 30, 20, 60, 'WOOD'], [1140, GROUND_Y - 30, 20, 60, 'WOOD'],
+      [940, GROUND_Y - 70, 40, 40, 'TNT'],
+      [1080, GROUND_Y - 70, 40, 40, 'TNT'],
+      [1010, GROUND_Y - 110, 200, 18, 'WOOD'],
+      [970, GROUND_Y - 150, 40, 40, 'TNT'],
+      [1050, GROUND_Y - 150, 40, 40, 'STONE'],
+      [1010, GROUND_Y - 210, 120, 18, 'WOOD']
+    ]
+  },
+  { // 8 Final Stand
+    name: 'Final Stand', birds: 5, birdTypes: ['heavy','red','speedy','heavy','red'],
+    pigs: [[920, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1180, GROUND_Y - PIG_RADIUS],
+           [1000, GROUND_Y - 200], [1100, GROUND_Y - 350]],
+    blocks: [
+      [950, GROUND_Y - 30, 350, 30, 'STONE'],
+      [820, GROUND_Y - 95, 28, 100, 'METAL'], [1080, GROUND_Y - 95, 28, 100, 'METAL'],
+      [950, GROUND_Y - 145, 280, 20, 'STONE'],
+      [880, GROUND_Y - 180, 40, 40, 'TNT'],
+      [1020, GROUND_Y - 180, 40, 40, 'TNT'],
+      [950, GROUND_Y - 230, 250, 18, 'WOOD'],
+      [880, GROUND_Y - 280, 18, 80, 'WOOD'], [1020, GROUND_Y - 280, 18, 80, 'WOOD'],
+      [950, GROUND_Y - 325, 200, 18, 'WOOD'],
+      [1050, GROUND_Y - 370, 100, 18, 'GLASS'],
+      [1150, GROUND_Y - 100, 28, 120, 'METAL']
+    ]
+  }
+];
+
+/* ============================================================
+   SECTION 3 — SAVE/LOAD STARS
+   ============================================================ */
+const SAVE_KEY = 'angryballs_save_v2';
+const SaveData = {
+  data: { unlocked: 1, stars: {}, totalScore: 0 },
+  load() {
+    try {
+      const s = localStorage.getItem(SAVE_KEY);
+      if (s) this.data = Object.assign(this.data, JSON.parse(s));
+    } catch (e) {}
+  },
+  save() {
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); } catch (e) {}
+  },
+  setStars(level, stars, score) {
+    const prev = this.data.stars[level] || 0;
+    if (stars > prev) this.data.stars[level] = stars;
+    if (level + 1 > this.data.unlocked && level + 1 <= LEVELS.length) {
+      this.data.unlocked = level + 1;
+    }
+    this.data.totalScore = Math.max(this.data.totalScore, score);
+    this.save();
+  },
+  reset() {
+    this.data = { unlocked: 1, stars: {}, totalScore: 0 };
+    this.save();
+  }
+};
+SaveData.load();
+
+/* ============================================================
+   SECTION 4 — UI / SCREEN MANAGER
+   ============================================================ */
+const UI = {
+  currentLevel: 0,
+  selectedPU: 'none',
+  show(id) {
+    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('hidden');
+  },
+  hideAll() {
+    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
+  },
+  showHUD(show) {
+    ['hud','powerup-bar','reset-btn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (show) el.classList.remove('hidden');
+      else el.classList.add('hidden');
+    });
+  },
+  setLevelLabel(n) {
+    document.getElementById('level-label').textContent = `LEVEL ${n+1}: ${LEVELS[n].name.toUpperCase()}`;
+  },
+  setScore(s) {
+    document.getElementById('score-label').textContent = `SCORE: ${s}`;
+  },
+  setBirds(total, used, types = []) {
+    const row = document.getElementById('birds-row');
+    row.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const type = types[i] || 'red';
+      const spec = BIRD_TYPES[type] || BIRD_TYPES.red;
+      const d = document.createElement('div');
+      d.className = `bird-icon ${type}` + (i < used ? ' used' : '');
+      d.title = spec.name;
+      if (spec.label) {
+        const span = document.createElement('span');
+        span.className = 'mini-label';
+        span.textContent = spec.label;
+        d.appendChild(span);
+      }
+      row.appendChild(d);
+    }
+  },
+  setHint(text, show) {
+    const h = document.getElementById('hint');
+    h.textContent = text;
+    if (show) h.classList.remove('hidden');
+    else h.classList.add('hidden');
+  },
+  buildLevelGrid() {
+    const grid = document.getElementById('level-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < LEVELS.length; i++) {
+      const locked = (i + 1) > SaveData.data.unlocked;
+      const stars = SaveData.data.stars[i] || 0;
+      const card = document.createElement('div');
+      card.className = 'level-card' + (locked ? ' locked' : '');
+      const thumb = document.createElement('div'); thumb.className = 'thumb';
+      thumb.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 100 50" preserveAspectRatio="none">
+        <rect x="0" y="0" width="100" height="50" fill="url(#sky${i})"/>
+        <defs><linearGradient id="sky${i}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#87ceeb"/><stop offset="1" stop-color="#f0c987"/>
+        </linearGradient></defs>
+        <polygon points="0,50 30,25 50,35 80,15 100,30 100,50" fill="#5a7c4a"/>
+        <circle cx="20" cy="40" r="4" fill="#c0392b"/>
+        ${LEVELS[i].pigs.slice(0,3).map((_,j)=>`<circle cx="${65+j*8}" cy="42" r="3" fill="#7bc043"/>`).join('')}
+      </svg>`;
+      card.appendChild(thumb);
+      const num = document.createElement('div'); num.className = 'num'; num.textContent = (i+1);
+      card.appendChild(num);
+      const name = document.createElement('div'); name.className = 'name'; name.textContent = LEVELS[i].name;
+      card.appendChild(name);
+      const st = document.createElement('div'); st.className = 'stars';
+      st.innerHTML = [0,1,2].map(s => s < stars ? '★' : '<span class="empty">★</span>').join('');
+      card.appendChild(st);
+      if (!locked) {
+        card.addEventListener('click', () => {
+          SFX.chime();
+          UI.currentLevel = i;
+          startLevel(i);
+        });
+      }
+      grid.appendChild(card);
+    }
+  },
+  setSelectedPU(pu) {
+    this.selectedPU = pu;
+    document.querySelectorAll('.pu-slot').forEach(el => {
+      el.classList.toggle('selected', el.dataset.pu === pu);
+    });
+  }
+};
+window.UI = UI;
 
 /* ============================================================
    SECTION 1 — WEB AUDIO SOUND ENGINE (15+ effects)
@@ -642,260 +897,6 @@ const SFX = (() => {
     droneStart, droneDuck, setMuted
   };
 })();
-
-/* ============================================================
-   SECTION 2 — CONSTANTS & GAME DATA
-   ============================================================ */
-const GAME_W = 1280;
-const GAME_H = 720;
-const GROUND_Y = 640;
-const SLINGSHOT_X = 180;
-const SLINGSHOT_Y = 560;
-const SLINGSHOT_TOP = 510;
-const MAX_PULL = 140;
-const LAUNCH_POWER = 0.22;
-
-const MAT = {
-  WOOD:  { hp: 80,  color: 0xb07a3a, dark: 0x6f4a1f, density: 0.0012, restitution: 0.2, friction: 0.6, type: 'wood' },
-  STONE: { hp: 200, color: 0x9aa0a6, dark: 0x55595f, density: 0.0028, restitution: 0.15, friction: 0.8, type: 'stone' },
-  GLASS: { hp: 30,  color: 0x9ee6ff, dark: 0x4ea3c4, density: 0.0010, restitution: 0.4, friction: 0.3, type: 'glass' },
-  METAL: { hp: 400, color: 0xdde2e9, dark: 0x7d8694, density: 0.0040, restitution: 0.5, friction: 0.5, type: 'metal' },
-  TNT:   { hp: 40,  color: 0xff7733, dark: 0x9a3a10, density: 0.0014, restitution: 0.2, friction: 0.6, type: 'tnt' }
-};
-
-const PIG_RADIUS = 22;
-
-const BIRD_TYPES = {
-  red:    { name: 'Classic', radius: 22, density: 0.0028, restitution: 0.40, power: 1.00, damage: 1.00, color: 0xe74c3c, label: '' },
-  heavy:  { name: 'Crusher', radius: 27, density: 0.0044, restitution: 0.22, power: 0.86, damage: 1.75, color: 0x555555, label: 'H' },
-  speedy: { name: 'Comet',   radius: 18, density: 0.0019, restitution: 0.55, power: 1.25, damage: 0.90, color: 0xff7f11, label: 'S' }
-};
-
-// Level definitions. Each block: [x,y,w,h,mat]. Each pig: [x,y].
-const LEVELS = [
-  { // 1 First Flight
-    name: 'First Flight', birds: 3, birdTypes: ['red','red','heavy'],
-    pigs: [[1000, GROUND_Y - PIG_RADIUS]],
-    blocks: [
-      [970, GROUND_Y - 30, 20, 60, 'WOOD'],
-      [1030, GROUND_Y - 30, 20, 60, 'WOOD'],
-      [1000, GROUND_Y - 70, 80, 20, 'WOOD']
-    ]
-  },
-  { // 2 Double Trouble
-    name: 'Double Trouble', birds: 3, birdTypes: ['red','speedy','heavy'],
-    pigs: [[900, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS]],
-    blocks: [
-      [870, GROUND_Y - 30, 18, 60, 'WOOD'], [930, GROUND_Y - 30, 18, 60, 'WOOD'],
-      [900, GROUND_Y - 70, 80, 18, 'WOOD'],
-      [1050, GROUND_Y - 30, 18, 60, 'WOOD'], [1110, GROUND_Y - 30, 18, 60, 'WOOD'],
-      [1080, GROUND_Y - 70, 80, 18, 'WOOD']
-    ]
-  },
-  { // 3 Glass House
-    name: 'Glass House', birds: 3, birdTypes: ['speedy','red','heavy'],
-    pigs: [[1000, GROUND_Y - PIG_RADIUS], [1000, GROUND_Y - 110]],
-    blocks: [
-      [950, GROUND_Y - 40, 18, 80, 'GLASS'], [1050, GROUND_Y - 40, 18, 80, 'GLASS'],
-      [1000, GROUND_Y - 90, 120, 18, 'GLASS'],
-      [950, GROUND_Y - 140, 18, 80, 'GLASS'], [1050, GROUND_Y - 140, 18, 80, 'GLASS'],
-      [1000, GROUND_Y - 190, 120, 18, 'GLASS'],
-      [1000, GROUND_Y - 220, 100, 18, 'WOOD']
-    ]
-  },
-  { // 4 Stone Fortress
-    name: 'Stone Fortress', birds: 4, birdTypes: ['heavy','heavy','red','speedy'],
-    pigs: [[1000, GROUND_Y - PIG_RADIUS], [1090, GROUND_Y - PIG_RADIUS], [1000, GROUND_Y - 130]],
-    blocks: [
-      [950, GROUND_Y - 50, 30, 100, 'STONE'],
-      [1050, GROUND_Y - 50, 30, 100, 'STONE'],
-      [1140, GROUND_Y - 50, 30, 100, 'STONE'],
-      [1000, GROUND_Y - 110, 130, 20, 'STONE'],
-      [1095, GROUND_Y - 110, 110, 20, 'STONE']
-    ]
-  },
-  { // 5 Mixed Materials
-    name: 'Mixed Materials', birds: 4, birdTypes: ['red','speedy','heavy','red'],
-    pigs: [[960, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1020, GROUND_Y - 170]],
-    blocks: [
-      [950, GROUND_Y - 25, 200, 30, 'STONE'],
-      [880, GROUND_Y - 85, 18, 80, 'WOOD'], [1020, GROUND_Y - 85, 18, 80, 'WOOD'],
-      [950, GROUND_Y - 130, 200, 18, 'WOOD'],
-      [950, GROUND_Y - 160, 40, 40, 'TNT'],
-      [1020, GROUND_Y - 200, 60, 60, 'GLASS']
-    ]
-  },
-  { // 6 Sky Castle
-    name: 'Sky Castle', birds: 4, birdTypes: ['speedy','red','heavy','speedy'],
-    pigs: [[900, GROUND_Y - PIG_RADIUS], [1050, GROUND_Y - 170], [1150, GROUND_Y - 290], [950, GROUND_Y - 290]],
-    blocks: [
-      [880, GROUND_Y - 30, 18, 60, 'WOOD'], [940, GROUND_Y - 30, 18, 60, 'WOOD'],
-      [910, GROUND_Y - 70, 80, 18, 'WOOD'],
-      [1050, GROUND_Y - 145, 200, 22, 'STONE'],
-      [970, GROUND_Y - 195, 18, 80, 'WOOD'], [1130, GROUND_Y - 195, 18, 80, 'WOOD'],
-      [1050, GROUND_Y - 240, 200, 18, 'WOOD'],
-      [950, GROUND_Y - 320, 18, 60, 'GLASS'], [1150, GROUND_Y - 320, 18, 60, 'GLASS'],
-      [1050, GROUND_Y - 360, 250, 18, 'METAL']
-    ]
-  },
-  { // 7 Mine Chaos
-    name: 'Mine Chaos', birds: 4, birdTypes: ['red','heavy','speedy','heavy'],
-    pigs: [[940, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1010, GROUND_Y - 180]],
-    blocks: [
-      [880, GROUND_Y - 30, 20, 60, 'WOOD'], [1000, GROUND_Y - 30, 20, 60, 'WOOD'], [1140, GROUND_Y - 30, 20, 60, 'WOOD'],
-      [940, GROUND_Y - 70, 40, 40, 'TNT'],
-      [1080, GROUND_Y - 70, 40, 40, 'TNT'],
-      [1010, GROUND_Y - 110, 200, 18, 'WOOD'],
-      [970, GROUND_Y - 150, 40, 40, 'TNT'],
-      [1050, GROUND_Y - 150, 40, 40, 'STONE'],
-      [1010, GROUND_Y - 210, 120, 18, 'WOOD']
-    ]
-  },
-  { // 8 Final Stand
-    name: 'Final Stand', birds: 5, birdTypes: ['heavy','red','speedy','heavy','red'],
-    pigs: [[920, GROUND_Y - PIG_RADIUS], [1080, GROUND_Y - PIG_RADIUS], [1180, GROUND_Y - PIG_RADIUS],
-           [1000, GROUND_Y - 200], [1100, GROUND_Y - 350]],
-    blocks: [
-      [950, GROUND_Y - 30, 350, 30, 'STONE'],
-      [820, GROUND_Y - 95, 28, 100, 'METAL'], [1080, GROUND_Y - 95, 28, 100, 'METAL'],
-      [950, GROUND_Y - 145, 280, 20, 'STONE'],
-      [880, GROUND_Y - 180, 40, 40, 'TNT'],
-      [1020, GROUND_Y - 180, 40, 40, 'TNT'],
-      [950, GROUND_Y - 230, 250, 18, 'WOOD'],
-      [880, GROUND_Y - 280, 18, 80, 'WOOD'], [1020, GROUND_Y - 280, 18, 80, 'WOOD'],
-      [950, GROUND_Y - 325, 200, 18, 'WOOD'],
-      [1050, GROUND_Y - 370, 100, 18, 'GLASS'],
-      [1150, GROUND_Y - 100, 28, 120, 'METAL']
-    ]
-  }
-];
-
-/* ============================================================
-   SECTION 3 — SAVE/LOAD STARS
-   ============================================================ */
-const SAVE_KEY = 'angryballs_save_v2';
-const SaveData = {
-  data: { unlocked: 1, stars: {}, totalScore: 0 },
-  load() {
-    try {
-      const s = localStorage.getItem(SAVE_KEY);
-      if (s) this.data = Object.assign(this.data, JSON.parse(s));
-    } catch (e) {}
-  },
-  save() {
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.data)); } catch (e) {}
-  },
-  setStars(level, stars, score) {
-    const prev = this.data.stars[level] || 0;
-    if (stars > prev) this.data.stars[level] = stars;
-    if (level + 1 > this.data.unlocked && level + 1 <= LEVELS.length) {
-      this.data.unlocked = level + 1;
-    }
-    this.data.totalScore = Math.max(this.data.totalScore, score);
-    this.save();
-  },
-  reset() {
-    this.data = { unlocked: 1, stars: {}, totalScore: 0 };
-    this.save();
-  }
-};
-SaveData.load();
-
-/* ============================================================
-   SECTION 4 — UI / SCREEN MANAGER
-   ============================================================ */
-const UI = {
-  currentLevel: 0,
-  selectedPU: 'none',
-  show(id) {
-    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('hidden');
-  },
-  hideAll() {
-    document.querySelectorAll('.overlay').forEach(el => el.classList.add('hidden'));
-  },
-  showHUD(show) {
-    ['hud','powerup-bar','reset-btn'].forEach(id => {
-      const el = document.getElementById(id);
-      if (show) el.classList.remove('hidden');
-      else el.classList.add('hidden');
-    });
-  },
-  setLevelLabel(n) {
-    document.getElementById('level-label').textContent = `LEVEL ${n+1}: ${LEVELS[n].name.toUpperCase()}`;
-  },
-  setScore(s) {
-    document.getElementById('score-label').textContent = `SCORE: ${s}`;
-  },
-  setBirds(total, used, types = []) {
-    const row = document.getElementById('birds-row');
-    row.innerHTML = '';
-    for (let i = 0; i < total; i++) {
-      const type = types[i] || 'red';
-      const spec = BIRD_TYPES[type] || BIRD_TYPES.red;
-      const d = document.createElement('div');
-      d.className = `bird-icon ${type}` + (i < used ? ' used' : '');
-      d.title = spec.name;
-      if (spec.label) {
-        const span = document.createElement('span');
-        span.className = 'mini-label';
-        span.textContent = spec.label;
-        d.appendChild(span);
-      }
-      row.appendChild(d);
-    }
-  },
-  setHint(text, show) {
-    const h = document.getElementById('hint');
-    h.textContent = text;
-    if (show) h.classList.remove('hidden');
-    else h.classList.add('hidden');
-  },
-  buildLevelGrid() {
-    const grid = document.getElementById('level-grid');
-    grid.innerHTML = '';
-    for (let i = 0; i < LEVELS.length; i++) {
-      const locked = (i + 1) > SaveData.data.unlocked;
-      const stars = SaveData.data.stars[i] || 0;
-      const card = document.createElement('div');
-      card.className = 'level-card' + (locked ? ' locked' : '');
-      const thumb = document.createElement('div'); thumb.className = 'thumb';
-      thumb.innerHTML = `<svg width="100%" height="100%" viewBox="0 0 100 50" preserveAspectRatio="none">
-        <rect x="0" y="0" width="100" height="50" fill="url(#sky${i})"/>
-        <defs><linearGradient id="sky${i}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#87ceeb"/><stop offset="1" stop-color="#f0c987"/>
-        </linearGradient></defs>
-        <polygon points="0,50 30,25 50,35 80,15 100,30 100,50" fill="#5a7c4a"/>
-        <circle cx="20" cy="40" r="4" fill="#c0392b"/>
-        ${LEVELS[i].pigs.slice(0,3).map((_,j)=>`<circle cx="${65+j*8}" cy="42" r="3" fill="#7bc043"/>`).join('')}
-      </svg>`;
-      card.appendChild(thumb);
-      const num = document.createElement('div'); num.className = 'num'; num.textContent = (i+1);
-      card.appendChild(num);
-      const name = document.createElement('div'); name.className = 'name'; name.textContent = LEVELS[i].name;
-      card.appendChild(name);
-      const st = document.createElement('div'); st.className = 'stars';
-      st.innerHTML = [0,1,2].map(s => s < stars ? '★' : '<span class="empty">★</span>').join('');
-      card.appendChild(st);
-      if (!locked) {
-        card.addEventListener('click', () => {
-          SFX.chime();
-          UI.currentLevel = i;
-          startLevel(i);
-        });
-      }
-      grid.appendChild(card);
-    }
-  },
-  setSelectedPU(pu) {
-    this.selectedPU = pu;
-    document.querySelectorAll('.pu-slot').forEach(el => {
-      el.classList.toggle('selected', el.dataset.pu === pu);
-    });
-  }
-};
-window.UI = UI;
 
 /* ============================================================
    SECTION 5 — UTILITY DRAWING (procedural textures)
@@ -2104,6 +2105,80 @@ document.getElementById('btn-victory-menu').addEventListener('click', () => {
 // Prevent unwanted gestures
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
+
+
+window.addEventListener('load', () => {
+  UI.showHUD(false);
+  UI.show('screen-start');
+  // Mobile fallback: start Level 1 automatically shortly after load.
+  // This removes any dependency on iOS/Safari dispatching the menu button click correctly.
+  setTimeout(() => {
+    const scene = getGameScene();
+    if (scene && !scene.activeBird && !scene.launched && !scene.transitionLock) {
+      startLevel(0);
+    }
+  }, 900);
+});
+
+document.getElementById('btn-play').addEventListener('click', () => {
+  SFX.click();
+  startLevel(0);
+});
+
+['pointerdown', 'touchstart'].forEach(evt => {
+  document.getElementById('screen-start').addEventListener(evt, () => {
+    const scene = getGameScene();
+    if (scene && !scene.activeBird) startLevel(0);
+  }, { passive: true });
+});
+
+document.getElementById('btn-levels').addEventListener('click', () => {
+  SFX.click();
+  UI.buildLevelGrid();
+  UI.show('screen-levels');
+});
+document.getElementById('btn-back-start').addEventListener('click', () => {
+  SFX.click();
+  UI.show('screen-start');
+});
+document.getElementById('btn-next').addEventListener('click', () => {
+  SFX.click();
+  const next = UI.currentLevel + 1;
+  if (next < LEVELS.length) {
+    startLevel(next);
+  } else {
+    UI.show('screen-start');
+  }
+});
+document.getElementById('btn-replay').addEventListener('click', () => {
+  SFX.click();
+  startLevel(UI.currentLevel);
+});
+document.getElementById('btn-menu').addEventListener('click', () => {
+  SFX.click();
+  UI.show('screen-start');
+});
+document.getElementById('btn-fail-retry').addEventListener('click', () => {
+  SFX.click();
+  startLevel(UI.currentLevel);
+});
+document.getElementById('btn-fail-menu').addEventListener('click', () => {
+  SFX.click();
+  UI.show('screen-start');
+});
+document.getElementById('btn-victory-again').addEventListener('click', () => {
+  SFX.click();
+  startLevel(0);
+});
+document.getElementById('btn-victory-menu').addEventListener('click', () => {
+  SFX.click();
+  UI.show('screen-start');
+});
+
+// Prevent unwanted gestures
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+
 
 </script>
 </body>
