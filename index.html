@@ -882,8 +882,7 @@ const UI = {
         card.addEventListener('click', () => {
           SFX.chime();
           UI.currentLevel = i;
-          UI.hideAll();
-          game.scene.getScene('GameScene').loadLevel(i);
+          startLevel(i);
         });
       }
       grid.appendChild(card);
@@ -896,6 +895,7 @@ const UI = {
     });
   }
 };
+window.UI = UI;
 
 /* ============================================================
    SECTION 5 — UTILITY DRAWING (procedural textures)
@@ -1158,8 +1158,8 @@ class GameScene extends Phaser.Scene {
     // HUD wiring
     this.bindHUD();
 
-    // start drone
-    SFX.droneStart();
+    // Background drone starts after the first user gesture in startLevel().
+    // This avoids mobile browser audio-context restrictions interrupting scene startup.
   }
 
   // ---------- Parallax ----------
@@ -1999,6 +1999,36 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+window.game = game;
+
+function getGameScene() {
+  return game.scene.getScene('GameScene');
+}
+
+function startAudioOnce() {
+  if (window.__angryBallsAudioStarted) return;
+  window.__angryBallsAudioStarted = true;
+  try { SFX.droneStart(); } catch (e) { console.warn('Audio start deferred/blocked:', e); }
+}
+
+function startLevel(levelIndex) {
+  startAudioOnce();
+  UI.hideAll();
+  const tryStart = (attempt = 0) => {
+    const scene = getGameScene();
+    if (scene && scene.scene && scene.scene.isActive() && typeof scene.loadLevel === 'function') {
+      scene.loadLevel(levelIndex);
+      return;
+    }
+    if (attempt < 30) {
+      setTimeout(() => tryStart(attempt + 1), 100);
+    } else {
+      console.error('GameScene was not ready; could not start level', levelIndex);
+      UI.show('screen-start');
+    }
+  };
+  tryStart();
+}
 
 /* ============================================================
    SECTION 8 — DOM EVENT WIRING
@@ -2010,8 +2040,7 @@ window.addEventListener('load', () => {
 
 document.getElementById('btn-play').addEventListener('click', () => {
   SFX.click();
-  UI.hideAll();
-  game.scene.getScene('GameScene').loadLevel(0);
+  startLevel(0);
 });
 document.getElementById('btn-levels').addEventListener('click', () => {
   SFX.click();
@@ -2026,14 +2055,14 @@ document.getElementById('btn-next').addEventListener('click', () => {
   SFX.click();
   const next = UI.currentLevel + 1;
   if (next < LEVELS.length) {
-    game.scene.getScene('GameScene').loadLevel(next);
+    startLevel(next);
   } else {
     UI.show('screen-start');
   }
 });
 document.getElementById('btn-replay').addEventListener('click', () => {
   SFX.click();
-  game.scene.getScene('GameScene').loadLevel(UI.currentLevel);
+  startLevel(UI.currentLevel);
 });
 document.getElementById('btn-menu').addEventListener('click', () => {
   SFX.click();
@@ -2041,7 +2070,7 @@ document.getElementById('btn-menu').addEventListener('click', () => {
 });
 document.getElementById('btn-fail-retry').addEventListener('click', () => {
   SFX.click();
-  game.scene.getScene('GameScene').loadLevel(UI.currentLevel);
+  startLevel(UI.currentLevel);
 });
 document.getElementById('btn-fail-menu').addEventListener('click', () => {
   SFX.click();
@@ -2049,7 +2078,7 @@ document.getElementById('btn-fail-menu').addEventListener('click', () => {
 });
 document.getElementById('btn-victory-again').addEventListener('click', () => {
   SFX.click();
-  game.scene.getScene('GameScene').loadLevel(0);
+  startLevel(0);
 });
 document.getElementById('btn-victory-menu').addEventListener('click', () => {
   SFX.click();
