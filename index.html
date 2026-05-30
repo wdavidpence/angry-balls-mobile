@@ -2036,12 +2036,28 @@ function startLevel(levelIndex) {
 window.addEventListener('load', () => {
   UI.showHUD(false);
   UI.show('screen-start');
+  // Mobile fallback: start Level 1 automatically shortly after load.
+  // This removes any dependency on iOS/Safari dispatching the menu button click correctly.
+  setTimeout(() => {
+    const scene = getGameScene();
+    if (scene && !scene.activeBird && !scene.launched && !scene.transitionLock) {
+      startLevel(0);
+    }
+  }, 900);
 });
 
 document.getElementById('btn-play').addEventListener('click', () => {
   SFX.click();
   startLevel(0);
 });
+
+['pointerdown', 'touchstart'].forEach(evt => {
+  document.getElementById('screen-start').addEventListener(evt, () => {
+    const scene = getGameScene();
+    if (scene && !scene.activeBird) startLevel(0);
+  }, { passive: true });
+});
+
 document.getElementById('btn-levels').addEventListener('click', () => {
   SFX.click();
   UI.buildLevelGrid();
