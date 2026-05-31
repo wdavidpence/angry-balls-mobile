@@ -1294,7 +1294,7 @@ class GameScene extends Phaser.Scene {
       label: mat === 'TNT' ? 'tnt' : 'block'
     });
     const obj = { gfx, body, mat, w, h, hp: m.hp, maxHp: m.hp };
-    body.gameObject = obj;
+    body.phaserObj = obj;
     this.blocks.push(obj);
     return obj;
   }
@@ -1307,7 +1307,7 @@ class GameScene extends Phaser.Scene {
       density: 0.001, friction: 0.6, restitution: 0.3, label: 'pig'
     });
     const obj = { gfx, body, hp: 50, maxHp: 50, expression: 'happy', dead: false, frozen: false };
-    body.gameObject = obj;
+    body.phaserObj = obj;
     this.pigs.push(obj);
     return obj;
   }
@@ -1427,7 +1427,7 @@ class GameScene extends Phaser.Scene {
     const launchPower = LAUNCH_POWER * b.launchPowerMult;
     this.matter.body.setVelocity(body, { x: vx * launchPower, y: vy * launchPower });
     this.matter.body.setAngularVelocity(body, 0.2);
-    body.gameObject = b;
+    body.phaserObj = b;
     b.body = body;
     b.state = 'flying';
     this.flying = true;
@@ -1609,7 +1609,7 @@ class GameScene extends Phaser.Scene {
   onCollision(event) {
     for (const pair of event.pairs) {
       const a = pair.bodyA, b = pair.bodyB;
-      const ga = a.gameObject, gb = b.gameObject;
+      const ga = a.phaserObj, gb = b.phaserObj;
       const speed = Math.hypot(
         (a.velocity.x - b.velocity.x),
         (a.velocity.y - b.velocity.y)
