@@ -302,7 +302,7 @@
 </div>
 
 
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script></script>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 <script>
 /* ============================================================
    ANGRY BALLS - UPGRADED EDITION
@@ -322,7 +322,7 @@ const MAX_PULL = 140;
 const LAUNCH_POWER = 0.22;
 
 const MAT = {
-  WOOD:  { hp: 80,  color: 0xb07a3a, dark: 0x6f4a1f, density: 0.0012, restitution: 0.2, friction: 0.6, type: 'wood' },
+  WOOD:  { hp: 80,  color: 0xb07a3a, dark: 0x6f4a1f, density: 0.0012, restitution: 0.05, friction: 0.6, type: 'wood' },
   STONE: { hp: 200, color: 0x9aa0a6, dark: 0x55595f, density: 0.0028, restitution: 0.15, friction: 0.8, type: 'stone' },
   GLASS: { hp: 30,  color: 0x9ee6ff, dark: 0x4ea3c4, density: 0.0010, restitution: 0.4, friction: 0.3, type: 'glass' },
   METAL: { hp: 400, color: 0xdde2e9, dark: 0x7d8694, density: 0.0040, restitution: 0.5, friction: 0.5, type: 'metal' },
@@ -1249,6 +1249,7 @@ class GameScene extends Phaser.Scene {
     UI.setLevelLabel(idx);
     UI.currentLevel = idx;
     UI.setSelectedPU('none');
+    this.settleTimer = 1500; // ms — grace period so settling blocks don't self-destruct
     this.clearLevel();
     const L = LEVELS[idx];
     this.totalBirds = L.birds;
@@ -1607,6 +1608,8 @@ class GameScene extends Phaser.Scene {
 
   // ---------- Collisions ----------
   onCollision(event) {
+    // Skip all damage during settling grace period
+    if (this.settleTimer > 0) return;
     for (const pair of event.pairs) {
       const a = pair.bodyA, b = pair.bodyB;
       const ga = a.phaserObj, gb = b.phaserObj;
@@ -1644,10 +1647,10 @@ class GameScene extends Phaser.Scene {
           if (gb && b.label === 'pig') this.damagePig(gb, impact * 3);
         }
       }
-      // block hitting ground
+      // block hitting ground — only hard impacts should damage
       if ((a.label === 'block' || a.label === 'tnt' || a.label === 'pig') && b.label === 'ground' ||
           (b.label === 'block' || b.label === 'tnt' || b.label === 'pig') && a.label === 'ground') {
-        if (impact > 0.6) {
+        if (impact > 3) {
           const obj = a.label === 'ground' ? gb : ga;
           if (obj && obj.body && (obj.body.label === 'block' || obj.body.label === 'tnt')) {
             this.damageBlock(obj, impact * 1.5);
@@ -1864,6 +1867,12 @@ class GameScene extends Phaser.Scene {
 
   // ---------- Update Loop ----------
   update(time, delta) {
+    // Settling grace period countdown
+    if (this.settleTimer > 0) {
+      this.settleTimer -= delta;
+      if (this.settleTimer < 0) this.settleTimer = 0;
+    }
+
     const dt = delta / 1000;
 
     // Parallax clouds drift
@@ -2013,17 +2022,25 @@ function startAudioOnce() {
 }
 
 function startLevel(levelIndex) {
+  // Guard: prevent concurrent startLevel calls from racing
+  if (window.__startingLevel) {
+    console.log('startLevel ignored: already starting a level');
+    return;
+  }
+  window.__startingLevel = true;
   startAudioOnce();
   UI.hideAll();
   const tryStart = (attempt = 0) => {
     const scene = getGameScene();
     if (scene && scene.scene && scene.scene.isActive() && typeof scene.loadLevel === 'function') {
+      window.__startingLevel = false;
       scene.loadLevel(levelIndex);
       return;
     }
     if (attempt < 30) {
       setTimeout(() => tryStart(attempt + 1), 100);
     } else {
+      window.__startingLevel = false;
       console.error('GameScene was not ready; could not start level', levelIndex);
       UI.show('screen-start');
     }
@@ -2037,14 +2054,14 @@ function startLevel(levelIndex) {
 window.addEventListener('load', () => {
   UI.showHUD(false);
   UI.show('screen-start');
-  // Mobile fallback: start Level 1 automatically shortly after load.
-  // This removes any dependency on iOS/Safari dispatching the menu button click correctly.
+  // Mobile fallback: start Level 1 automatically after load if user hasn't started yet.
+  // Increased delay to 1500ms to let Phaser finish booting.
   setTimeout(() => {
     const scene = getGameScene();
-    if (scene && !scene.activeBird && !scene.launched && !scene.transitionLock) {
+    if (scene && scene.activeBird === null && !scene.launched && !scene.transitionLock && !window.__startingLevel) {
       startLevel(0);
     }
-  }, 900);
+  }, 1500);
 });
 
 document.getElementById('btn-play').addEventListener('click', () => {
@@ -2054,8 +2071,7 @@ document.getElementById('btn-play').addEventListener('click', () => {
 
 ['pointerdown', 'touchstart'].forEach(evt => {
   document.getElementById('screen-start').addEventListener(evt, () => {
-    const scene = getGameScene();
-    if (scene && !scene.activeBird) startLevel(0);
+    if (!window.__startingLevel) startLevel(0);
   }, { passive: true });
 });
 
@@ -2105,80 +2121,6 @@ document.getElementById('btn-victory-menu').addEventListener('click', () => {
 // Prevent unwanted gestures
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
-
-
-window.addEventListener('load', () => {
-  UI.showHUD(false);
-  UI.show('screen-start');
-  // Mobile fallback: start Level 1 automatically shortly after load.
-  // This removes any dependency on iOS/Safari dispatching the menu button click correctly.
-  setTimeout(() => {
-    const scene = getGameScene();
-    if (scene && !scene.activeBird && !scene.launched && !scene.transitionLock) {
-      startLevel(0);
-    }
-  }, 900);
-});
-
-document.getElementById('btn-play').addEventListener('click', () => {
-  SFX.click();
-  startLevel(0);
-});
-
-['pointerdown', 'touchstart'].forEach(evt => {
-  document.getElementById('screen-start').addEventListener(evt, () => {
-    const scene = getGameScene();
-    if (scene && !scene.activeBird) startLevel(0);
-  }, { passive: true });
-});
-
-document.getElementById('btn-levels').addEventListener('click', () => {
-  SFX.click();
-  UI.buildLevelGrid();
-  UI.show('screen-levels');
-});
-document.getElementById('btn-back-start').addEventListener('click', () => {
-  SFX.click();
-  UI.show('screen-start');
-});
-document.getElementById('btn-next').addEventListener('click', () => {
-  SFX.click();
-  const next = UI.currentLevel + 1;
-  if (next < LEVELS.length) {
-    startLevel(next);
-  } else {
-    UI.show('screen-start');
-  }
-});
-document.getElementById('btn-replay').addEventListener('click', () => {
-  SFX.click();
-  startLevel(UI.currentLevel);
-});
-document.getElementById('btn-menu').addEventListener('click', () => {
-  SFX.click();
-  UI.show('screen-start');
-});
-document.getElementById('btn-fail-retry').addEventListener('click', () => {
-  SFX.click();
-  startLevel(UI.currentLevel);
-});
-document.getElementById('btn-fail-menu').addEventListener('click', () => {
-  SFX.click();
-  UI.show('screen-start');
-});
-document.getElementById('btn-victory-again').addEventListener('click', () => {
-  SFX.click();
-  startLevel(0);
-});
-document.getElementById('btn-victory-menu').addEventListener('click', () => {
-  SFX.click();
-  UI.show('screen-start');
-});
-
-// Prevent unwanted gestures
-document.addEventListener('gesturestart', e => e.preventDefault());
-document.addEventListener('contextmenu', e => e.preventDefault());
-
 
 </script>
 </body>
