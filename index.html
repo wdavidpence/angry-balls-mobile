@@ -270,6 +270,9 @@
   <div id="audio-status" style="margin-top:20px; font-size:11px; color:rgba(255,255,255,0.65); text-align:center; line-height:1.4; text-shadow:1px 1px 1px #000;">
     Audio Status: Checking browser permission...
   </div>
+  <div id="audio-diagnostics" style="margin-top:15px; padding:10px; background:rgba(0,0,0,0.7); border:1px solid rgba(255,255,255,0.2); border-radius:8px; font-family:monospace; font-size:10px; color:#aaa; text-align:left; line-height:1.4; max-width:280px; margin-left:auto; margin-right:auto;">
+    <div>Web Audio: Checking...</div>
+  </div>
 </div>
 
 <!-- ===== Level Select ===== -->
@@ -591,17 +594,14 @@ const SFX = (() => {
   }
   function ac() {
     if (!ctx) {
-      if (window.game && window.game.sound && window.game.sound.context) {
-        ctx = window.game.sound.context;
-      } else {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-      }
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      ctx = new AudioCtxClass();
       masterGain = ctx.createGain();
       masterGain.gain.value = muted ? 0 : 0.70;
       masterGain.connect(ctx.destination);
     }
     if (ctx && ctx.state === 'suspended') {
-      try { ctx.resume(); } catch (e) {}
+      try { ctx.resume(); } catch (e) { console.warn(e); }
     }
     return ctx;
   }
@@ -1030,7 +1030,7 @@ const SFX = (() => {
     bombPU, icePU, windPU, speedPU,
     victory, fail, jingle, activate, chime,
     split, slam, dash,
-    droneStart, droneDuck, musicStart, musicStop, unlock, setMuted, getContext: () => ctx
+    droneStart, droneDuck, musicStart, musicStop, unlock, setMuted, getContext: () => ctx, getMusicStep: () => musicStep
   };
 })();
 
@@ -2324,6 +2324,64 @@ function updateAudioStatus() {
   }
 }
 window.setInterval(updateAudioStatus, 1000);
+
+// On-screen telemetry & exception catcher
+window.onerror = function(msg, url, line, col, error) {
+  const diag = document.getElementById('audio-diagnostics');
+  if (diag) {
+    diag.innerHTML = `
+      <div style="color:#ff4444; font-weight:bold; word-wrap:break-word;">⚠️ JS ERROR: ${msg}</div>
+      <div style="color:#ff8888; font-size:9px;">At ${line}:${col} in ${(url || '').split('/').pop()}</div>
+    `;
+  }
+  return false;
+};
+
+function updateAudioTelemetry() {
+  const diag = document.getElementById('audio-diagnostics');
+  if (!diag) return;
+  const hasWebAudio = !!(window.AudioContext || window.webkitAudioContext);
+  const ctx = SFX.getContext ? SFX.getContext() : null;
+
+  let html = `
+    <div style="color:#ffd166; font-weight:bold; border-bottom:1px solid rgba(255,255,255,0.15); padding-bottom:4px; margin-bottom:4px;">🔊 AUDIO TELEMETRY</div>
+    <div>• Support: ${hasWebAudio ? 'YES (WebAudio)' : 'NO'}</div>
+  `;
+
+  if (!hasWebAudio) {
+    html += `<div style="color:#ff4444;">• Web Audio is not supported in this browser!</div>`;
+  } else if (!ctx) {
+    html += `
+      <div>• Status: <span style="color:#ffd166;">NOT CREATED YET</span></div>
+      <div style="color:#fff; font-size:9px; margin-top:4px;">👉 Tap anywhere to trigger creation!</div>
+    `;
+  } else {
+    const isMuted = document.getElementById('sound-toggle') ? document.getElementById('sound-toggle').textContent === '🔇' : false;
+    const color = ctx.state === 'running' ? '#7CFC00' : '#ff4444';
+    html += `
+      <div>• Class: ${ctx.constructor.name}</div>
+      <div>• State: <span style="color:${color}; font-weight:bold;">${ctx.state.toUpperCase()}</span></div>
+      <div>• Master Vol: 70% ${isMuted ? '(MUTED)' : '(ACTIVE)'}</div>
+      <div>• Music Step: ${SFX.getMusicStep ? SFX.getMusicStep() : '0'}</div>
+    `;
+    if (ctx.state === 'running') {
+      html += `
+        <div style="color:#7CFC00; font-size:9px; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.15); padding-top:4px;">
+          🔊 Active! If silent, flip the physical switch on the side of your iPhone from Mute/Silent to Ring mode!
+        </div>
+      `;
+    } else {
+      html += `
+        <div style="color:#ffd166; font-size:9px; margin-top:6px; border-top:1px dashed rgba(255,255,255,0.15); padding-top:4px;">
+          👉 Tap anywhere to wake context!
+        </div>
+      `;
+    }
+  }
+  diag.innerHTML = html;
+}
+window.setInterval(updateAudioTelemetry, 500);
+updateAudioTelemetry();
 
 function startLevel(levelIndex) {
   if (window.__startingLevel) {
