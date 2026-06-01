@@ -31,6 +31,14 @@
     display: flex; align-items: center; gap: 10px;
   }
   #hud-left { flex-direction: column; align-items: flex-start; gap: 6px; }
+  #sound-toggle {
+    pointer-events: auto;
+    touch-action: manipulation;
+    position: relative;
+    z-index: 30;
+    min-width: 42px;
+    min-height: 36px;
+  }
   #level-label { font-size: 16px; color: #ffd166; }
   #score-label { font-size: 14px; color: #fff; }
   #birds-row { display: flex; gap: 4px; }
@@ -575,14 +583,14 @@ const SFX = (() => {
   let muted = false;
   function setMuted(m) {
     muted = m;
-    if (masterGain) masterGain.gain.value = m ? 0 : 0.55;
+    if (masterGain) masterGain.gain.value = m ? 0 : 0.70;
     return muted;
   }
   function ac() {
     if (!ctx) {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       masterGain = ctx.createGain();
-      masterGain.gain.value = 0.55;
+      masterGain.gain.value = muted ? 0 : 0.70;
       masterGain.connect(ctx.destination);
     }
     if (ctx.state === 'suspended') ctx.resume();
@@ -590,9 +598,27 @@ const SFX = (() => {
   }
   function unlock() {
     const a = ac();
-    if (a && a.state === 'suspended') a.resume();
-    droneStart();
-    musicStart();
+    try {
+      // iOS/Safari often needs a tiny actual source started inside the touch/click
+      // handler before it will allow later Web Audio graph playback.
+      const buffer = a.createBuffer(1, 1, a.sampleRate);
+      const src = a.createBufferSource();
+      src.buffer = buffer;
+      src.connect(masterGain);
+      src.start(0);
+    } catch (e) {}
+    const afterResume = () => {
+      droneStart();
+      musicStart();
+      click(); // audible confirmation that sound is unlocked
+    };
+    if (a && a.state === 'suspended') {
+      const resumeResult = a.resume();
+      if (resumeResult && resumeResult.then) resumeResult.then(afterResume).catch(afterResume);
+      else afterResume();
+    } else {
+      afterResume();
+    }
     return a;
   }
   function noiseBuffer(dur) {
@@ -937,7 +963,7 @@ const SFX = (() => {
     const o2 = a.createOscillator(); o2.type = 'sine'; o2.frequency.value = 82.4;
     const lfo = a.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.12;
     const lfoGain = a.createGain(); lfoGain.gain.value = 0.02;
-    const g = a.createGain(); g.gain.value = 0.06;
+    const g = a.createGain(); g.gain.value = 0.08;
     lfo.connect(lfoGain).connect(g.gain);
     o1.connect(g); o2.connect(g); g.connect(masterGain);
     o1.start(); o2.start(); lfo.start();
@@ -946,7 +972,7 @@ const SFX = (() => {
   function droneDuck(duck01) {
     if (!droneNodes) return;
     const a = ac(); const t = a.currentTime;
-    droneNodes.g.gain.linearRampToValueAtTime(0.06 * (1 - duck01*0.8), t + 0.2);
+    droneNodes.g.gain.linearRampToValueAtTime(0.08 * (1 - duck01*0.8), t + 0.2);
   }
 
   // 24. Soft procedural background music loop (C-major pentatonic)
@@ -960,7 +986,7 @@ const SFX = (() => {
     f.type = 'lowpass';
     f.frequency.setValueAtTime(950, when);
     f.Q.value = 0.7;
-    adsr(g, when, 0.035, 0.12, 0.45, 0.18, 0.018, dur);
+    adsr(g, when, 0.035, 0.12, 0.45, 0.18, 0.035, dur);
     o.connect(f).connect(g).connect(masterGain);
     o.start(when);
     o.stop(when + dur + 0.04);
@@ -1459,20 +1485,24 @@ class GameScene extends Phaser.Scene {
       });
     });
     document.getElementById('reset-btn').onclick = () => {
+      startAudioOnce();
       SFX.click();
       this.loadLevel(this.currentLevel);
     };
     // Sound toggle button
     let isMuted = false;
     document.getElementById('sound-toggle').onclick = () => {
+      startAudioOnce();
       isMuted = !isMuted;
       SFX.setMuted(isMuted);
       document.getElementById('sound-toggle').textContent = isMuted ? '🔇' : '🔊';
+      if (!isMuted) SFX.click();
     };
   }
 
   // ---------- Input ----------
   onPointerDown(p) {
+    startAudioOnce();
     const wx = p.worldX, wy = p.worldY;
     if (this.flying && this.projectiles.length > 0) {
       const abilityBird = this.projectiles.find(b => b && b.body && b.state === 'flying' && !b.abilityUsed);
@@ -2039,11 +2069,16 @@ class GameScene extends Phaser.Scene {
     this.spawnConfetti(GAME_W/2, 100);
     // determine stars
     const L = LEVELS[this.currentLevel];
-    const maxScore = L.pigs.length * 1000 + L.blocks.length * 500 + L.birds * 1000;
-    const ratio = this.score / maxScore;
+    const birdEfficiency = Math.max(0, (this.totalBirds - this.birdsUsed) / Math.max(1, this.totalBirds));
+    const originalBlocks = (L.blocks || []).length;
+    const destroyedBlocks = Math.max(0, originalBlocks - this.blocks.length);
+    const destructionRatio = originalBlocks ? destroyedBlocks / originalBlocks : 1;
+    const scoreTarget = (L.pigs.length * 1000) + (originalBlocks * 100) + (this.totalBirds * 1000);
+    const scoreRatio = Math.min(1, this.score / Math.max(1, scoreTarget));
+    const performance = (birdEfficiency * 0.55) + (scoreRatio * 0.30) + (destructionRatio * 0.15);
     let stars = 1;
-    if (ratio >= 0.6) stars = 2;
-    if (ratio >= 0.9) stars = 3;
+    if (performance >= 0.45) stars = 2;
+    if (performance >= 0.70) stars = 3;
     SaveData.setStars(this.currentLevel, stars, this.score);
     // show overlay
     document.getElementById('complete-score').textContent = `SCORE: ${this.score}`;
@@ -2238,11 +2273,9 @@ function getGameScene() {
 }
 
 function startAudioOnce() {
-  if (window.__angryBallsAudioStarted) return;
-  window.__angryBallsAudioStarted = true;
   try {
-    SFX.droneStart();
-    SFX.musicStart();
+    SFX.unlock();
+    window.__angryBallsAudioStarted = true;
   } catch (e) { console.warn('Audio start deferred/blocked:', e); }
 }
 
@@ -2258,6 +2291,7 @@ function unlockAudio() {
   window.removeEventListener('pointerdown', unlockAudio);
 }
 window.addEventListener('click', unlockAudio, { once: true });
+window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
 window.addEventListener('touchend', unlockAudio, { once: true, passive: true });
 window.addEventListener('pointerdown', unlockAudio, { once: true });
 
