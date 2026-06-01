@@ -267,6 +267,9 @@
     <button class="btn" id="btn-play">▶ PLAY</button>
     <button class="btn alt" id="btn-levels">📂 LEVEL SELECT</button>
   </div>
+  <div id="audio-status" style="margin-top:20px; font-size:11px; color:rgba(255,255,255,0.65); text-align:center; line-height:1.4; text-shadow:1px 1px 1px #000;">
+    Audio Status: Checking browser permission...
+  </div>
 </div>
 
 <!-- ===== Level Select ===== -->
@@ -588,12 +591,18 @@ const SFX = (() => {
   }
   function ac() {
     if (!ctx) {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (window.game && window.game.sound && window.game.sound.context) {
+        ctx = window.game.sound.context;
+      } else {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+      }
       masterGain = ctx.createGain();
       masterGain.gain.value = muted ? 0 : 0.70;
       masterGain.connect(ctx.destination);
     }
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx && ctx.state === 'suspended') {
+      try { ctx.resume(); } catch (e) {}
+    }
     return ctx;
   }
   function unlock() {
@@ -1021,7 +1030,7 @@ const SFX = (() => {
     bombPU, icePU, windPU, speedPU,
     victory, fail, jingle, activate, chime,
     split, slam, dash,
-    droneStart, droneDuck, musicStart, musicStop, unlock, setMuted
+    droneStart, droneDuck, musicStart, musicStop, unlock, setMuted, getContext: () => ctx
   };
 })();
 
@@ -2276,6 +2285,7 @@ function startAudioOnce() {
   try {
     SFX.unlock();
     window.__angryBallsAudioStarted = true;
+    updateAudioStatus();
   } catch (e) { console.warn('Audio start deferred/blocked:', e); }
 }
 
@@ -2283,10 +2293,12 @@ function unlockAudio() {
   try {
     SFX.unlock();
     window.__angryBallsAudioStarted = true;
+    updateAudioStatus();
   } catch (e) {
     console.warn('Audio unlock failed:', e);
   }
   window.removeEventListener('click', unlockAudio);
+  window.removeEventListener('touchstart', unlockAudio);
   window.removeEventListener('touchend', unlockAudio);
   window.removeEventListener('pointerdown', unlockAudio);
 }
@@ -2295,8 +2307,25 @@ window.addEventListener('touchstart', unlockAudio, { once: true, passive: true }
 window.addEventListener('touchend', unlockAudio, { once: true, passive: true });
 window.addEventListener('pointerdown', unlockAudio, { once: true });
 
+function updateAudioStatus() {
+  const el = document.getElementById('audio-status');
+  if (!el) return;
+  const ctx = SFX.getContext();
+  if (!ctx) {
+    el.innerHTML = "🔇 Audio Status: Checking... (Tap anywhere to start sound)";
+    return;
+  }
+  if (ctx.state === 'running') {
+    el.innerHTML = "🔊 Audio Status: <span style='color:#7CFC00; font-weight:bold;'>ACTIVE</span><br><span style='color:#ffd166;font-size:10px;'>If you still hear no sound, check your iPhone's physical Ring/Silent side-switch!</span>";
+  } else if (ctx.state === 'suspended') {
+    el.innerHTML = "🔇 Audio Status: <span style='color:#ff4444; font-weight:bold;'>SUSPENDED</span><br><span style='color:#ffd166;font-size:10px;'>Tap anywhere on the screen to unlock game sounds!</span>";
+  } else {
+    el.innerHTML = `🔇 Audio Status: ${ctx.state.toUpperCase()}`;
+  }
+}
+window.setInterval(updateAudioStatus, 1000);
+
 function startLevel(levelIndex) {
-  // Guard: prevent concurrent startLevel calls from racing
   if (window.__startingLevel) {
     console.log('startLevel ignored: already starting a level');
     return;
