@@ -570,6 +570,8 @@ const SFX = (() => {
   let ctx = null;
   let masterGain = null;
   let droneNodes = null;
+  let musicTimer = null;
+  let musicStep = 0;
   let muted = false;
   function setMuted(m) {
     muted = m;
@@ -585,6 +587,13 @@ const SFX = (() => {
     }
     if (ctx.state === 'suspended') ctx.resume();
     return ctx;
+  }
+  function unlock() {
+    const a = ac();
+    if (a && a.state === 'suspended') a.resume();
+    droneStart();
+    musicStart();
+    return a;
   }
   function noiseBuffer(dur) {
     const a = ac();
@@ -940,13 +949,53 @@ const SFX = (() => {
     droneNodes.g.gain.linearRampToValueAtTime(0.06 * (1 - duck01*0.8), t + 0.2);
   }
 
+  // 24. Soft procedural background music loop (C-major pentatonic)
+  function musicNote(freq, when, dur = 0.42) {
+    const a = ac();
+    const o = a.createOscillator();
+    const g = a.createGain();
+    const f = a.createBiquadFilter();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq, when);
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(950, when);
+    f.Q.value = 0.7;
+    adsr(g, when, 0.035, 0.12, 0.45, 0.18, 0.018, dur);
+    o.connect(f).connect(g).connect(masterGain);
+    o.start(when);
+    o.stop(when + dur + 0.04);
+  }
+  function musicTick() {
+    const a = ac();
+    if (a.state === 'suspended') return;
+    const t = a.currentTime + 0.015;
+    const pattern = [
+      [261.63, 329.63], [293.66], [392.00], [329.63, 440.00],
+      [392.00], [293.66, 329.63], [261.63], [440.00, 392.00]
+    ];
+    const chord = pattern[musicStep % pattern.length];
+    chord.forEach((freq, i) => musicNote(freq, t + i * 0.018, 0.46));
+    musicStep++;
+  }
+  function musicStart() {
+    if (musicTimer) return;
+    musicStep = 0;
+    musicTick();
+    musicTimer = window.setInterval(musicTick, 480);
+  }
+  function musicStop() {
+    if (!musicTimer) return;
+    window.clearInterval(musicTimer);
+    musicTimer = null;
+  }
+
   return {
     click, stretchStart, stretchUpdate, stretchStop, twang, whoosh, flying,
     thud, crumble, explode, squeal, groan,
     bombPU, icePU, windPU, speedPU,
     victory, fail, jingle, activate, chime,
     split, slam, dash,
-    droneStart, droneDuck, setMuted
+    droneStart, droneDuck, musicStart, musicStop, unlock, setMuted
   };
 })();
 
@@ -1857,7 +1906,11 @@ class GameScene extends Phaser.Scene {
     if (pig.hp < pig.maxHp * 0.6 && pig.expression === 'happy') {
       pig.expression = 'worried';
       drawPig(pig.gfx, PIG_RADIUS, 'worried');
+    }
+    const now = this.time ? this.time.now : 0;
+    if (!pig.lastSquealAt || now - pig.lastSquealAt > 220) {
       SFX.squeal();
+      pig.lastSquealAt = now;
     }
     if (pig.hp <= 0) {
       this.killPig(pig);
@@ -2187,8 +2240,26 @@ function getGameScene() {
 function startAudioOnce() {
   if (window.__angryBallsAudioStarted) return;
   window.__angryBallsAudioStarted = true;
-  try { SFX.droneStart(); } catch (e) { console.warn('Audio start deferred/blocked:', e); }
+  try {
+    SFX.droneStart();
+    SFX.musicStart();
+  } catch (e) { console.warn('Audio start deferred/blocked:', e); }
 }
+
+function unlockAudio() {
+  try {
+    SFX.unlock();
+    window.__angryBallsAudioStarted = true;
+  } catch (e) {
+    console.warn('Audio unlock failed:', e);
+  }
+  window.removeEventListener('click', unlockAudio);
+  window.removeEventListener('touchend', unlockAudio);
+  window.removeEventListener('pointerdown', unlockAudio);
+}
+window.addEventListener('click', unlockAudio, { once: true });
+window.addEventListener('touchend', unlockAudio, { once: true, passive: true });
+window.addEventListener('pointerdown', unlockAudio, { once: true });
 
 function startLevel(levelIndex) {
   // Guard: prevent concurrent startLevel calls from racing
