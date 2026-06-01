@@ -869,7 +869,58 @@ const SFX = (() => {
     });
   }
 
-  // 20. Background drone with slow LFO
+  // 20. Red bird active ability: playful split chirp
+  function split() {
+    const a = ac(); const t = a.currentTime;
+    [520, 780].forEach((freq, i) => {
+      const off = i * 0.075;
+      const o = a.createOscillator(); const g = a.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(freq, t + off);
+      o.frequency.exponentialRampToValueAtTime(freq * 1.18, t + off + 0.055);
+      adsr(g, t + off, 0.003, 0.015, 0.25, 0.035, 0.18, 0.085);
+      o.connect(g).connect(masterGain);
+      o.start(t + off); o.stop(t + off + 0.11);
+    });
+  }
+
+  // 21. Heavy bird active ability: sub boom plus short dust burst
+  function slam() {
+    const a = ac(); const t = a.currentTime;
+    const o = a.createOscillator(); const g = a.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(120, t);
+    o.frequency.exponentialRampToValueAtTime(30, t + 0.34);
+    adsr(g, t, 0.004, 0.045, 0.45, 0.22, 0.65, 0.42);
+    o.connect(g).connect(masterGain); o.start(t); o.stop(t + 0.46);
+
+    const src = a.createBufferSource(); src.buffer = noiseBuffer(0.18);
+    const f = a.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(900, t);
+    f.frequency.exponentialRampToValueAtTime(120, t + 0.16);
+    const ng = a.createGain();
+    adsr(ng, t, 0.002, 0.018, 0.25, 0.10, 0.35, 0.18);
+    src.connect(f).connect(ng).connect(masterGain); src.start(t); src.stop(t + 0.18);
+  }
+
+  // 22. Speedy bird active ability: bandpassed rocket whoosh
+  function dash() {
+    const a = ac(); const t = a.currentTime;
+    const src = a.createBufferSource(); src.buffer = noiseBuffer(0.32);
+    const f = a.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.setValueAtTime(700, t);
+    f.frequency.exponentialRampToValueAtTime(3600, t + 0.16);
+    f.frequency.exponentialRampToValueAtTime(1800, t + 0.30);
+    f.Q.value = 7;
+    const g = a.createGain();
+    g.gain.cancelScheduledValues(t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.42, t + 0.045);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    src.connect(f).connect(g).connect(masterGain); src.start(t); src.stop(t + 0.34);
+  }
+
+  // 23. Background drone with slow LFO
   function droneStart() {
     if (droneNodes) return;
     const a = ac();
@@ -894,6 +945,7 @@ const SFX = (() => {
     thud, crumble, explode, squeal, groan,
     bombPU, icePU, windPU, speedPU,
     victory, fail, jingle, activate, chime,
+    split, slam, dash,
     droneStart, droneDuck, setMuted
   };
 })();
@@ -1129,6 +1181,7 @@ class GameScene extends Phaser.Scene {
     this.blocks = [];
     this.pigs = [];
     this.activeBird = null;
+    this.projectiles = [];
     this.flying = false;
     this.launched = false;
     this.score = 0;
@@ -1272,10 +1325,15 @@ class GameScene extends Phaser.Scene {
   }
 
   clearLevel() {
-    if (this.activeBird) { this.destroyBird(this.activeBird); this.activeBird = null; }
+    if (this.projectiles) {
+      this.projectiles.slice().forEach(b => this.destroyBird(b));
+      this.projectiles = [];
+    }
+    if (this.activeBird && this.activeBird.body) { this.destroyBird(this.activeBird); }
+    this.activeBird = null;
     this.blocks.forEach(b => { if (b.body) this.matter.world.remove(b.body); b.gfx.destroy(); });
     this.pigs.forEach(p => { if (p.body) this.matter.world.remove(p.body); p.gfx.destroy(); });
-    this.blocks = []; this.pigs = []; this.birds = [];
+    this.blocks = []; this.pigs = []; this.birds = []; this.projectiles = [];
     this.particles.forEach(p => p.gfx.destroy());
     this.particles = [];
     this.flying = false; this.launched = false;
@@ -1324,8 +1382,9 @@ class GameScene extends Phaser.Scene {
     gfx.y = SLINGSHOT_TOP;
     const bird = {
       gfx, radius, body: null, state: 'waiting', type,
-      damageMult: spec.damage, launchPowerMult: spec.power,
-      pu: UI.selectedPU, puUsed: false, trailTimer: 0
+      damageMult: spec.damage, baseDamageMult: spec.damage, launchPowerMult: spec.power,
+      pu: UI.selectedPU, puUsed: false, abilityUsed: false,
+      slamArmed: false, dashArmed: false, trailTimer: 0
     };
     this.activeBird = bird;
     this.draggingBird = false;
@@ -1366,9 +1425,17 @@ class GameScene extends Phaser.Scene {
   // ---------- Input ----------
   onPointerDown(p) {
     const wx = p.worldX, wy = p.worldY;
-    if (this.flying && this.activeBird && this.activeBird.pu !== 'none' && !this.activeBird.puUsed) {
-      this.activatePowerUp();
-      return;
+    if (this.flying && this.projectiles.length > 0) {
+      const abilityBird = this.projectiles.find(b => b && b.body && b.state === 'flying' && !b.abilityUsed);
+      if (abilityBird) {
+        this.activateBirdAbility(abilityBird);
+        return;
+      }
+      const puBird = this.projectiles.find(b => b && b.body && b.state === 'flying' && b.pu !== 'none' && !b.puUsed);
+      if (puBird) {
+        this.activatePowerUp(puBird);
+        return;
+      }
     }
     if (!this.activeBird || this.activeBird.state !== 'waiting') return;
     const dx = wx - SLINGSHOT_X, dy = wy - SLINGSHOT_TOP;
@@ -1431,6 +1498,12 @@ class GameScene extends Phaser.Scene {
     body.phaserObj = b;
     b.body = body;
     b.state = 'flying';
+    b.abilityUsed = false;
+    b.slamArmed = false;
+    b.dashArmed = false;
+    b.baseDamageMult = spec.damage;
+    b.damageMult = spec.damage;
+    this.projectiles.push(b);
     this.flying = true;
     this.launched = true;
     this.zoomTarget = 1;
@@ -1451,9 +1524,69 @@ class GameScene extends Phaser.Scene {
     this.time.delayedCall(150, () => { if (this.flying) SFX.flying(); });
   }
 
-  activatePowerUp() {
-    if (!this.activeBird || this.activeBird.puUsed) return;
-    const b = this.activeBird;
+  spawnSplitClone(source, angleOffset) {
+    if (!source || !source.body) return null;
+    const spec = BIRD_TYPES[source.type] || BIRD_TYPES.red;
+    const x = source.body.position.x, y = source.body.position.y;
+    const v = source.body.velocity;
+    const cos = Math.cos(angleOffset), sin = Math.sin(angleOffset);
+    const rv = { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos };
+    const gfx = this.add.graphics();
+    drawBird(gfx, source.radius, source.pu, source.type);
+    gfx.x = x; gfx.y = y; gfx.rotation = source.gfx.rotation;
+    const body = this.matter.add.circle(x, y, source.radius, {
+      density: spec.density, friction: 0.4, restitution: spec.restitution, label: 'bird'
+    });
+    const clone = {
+      gfx, radius: source.radius, body, state: 'flying', type: source.type,
+      damageMult: source.baseDamageMult || spec.damage, baseDamageMult: source.baseDamageMult || spec.damage,
+      launchPowerMult: source.launchPowerMult || spec.power,
+      pu: source.pu, puUsed: true, abilityUsed: true,
+      slamArmed: false, dashArmed: false, trailTimer: 0
+    };
+    body.phaserObj = clone;
+    this.matter.body.setVelocity(body, rv);
+    this.matter.body.setAngularVelocity(body, angleOffset > 0 ? 0.35 : -0.35);
+    this.projectiles.push(clone);
+    return clone;
+  }
+
+  activateBirdAbility(b) {
+    if (!b || !b.body || b.abilityUsed) return;
+    b.abilityUsed = true;
+    const bx = b.body.position.x, by = b.body.position.y;
+    if (b.type === 'red') {
+      this.spawnSplitClone(b, 0.26);
+      this.spawnSplitClone(b, -0.26);
+      SFX.split();
+      this.showFloatingText('SPLIT!', bx, by - 35, '#ffdddd');
+      for (let i = 0; i < 18; i++) {
+        const a = Math.random()*Math.PI*2, s = 1.5 + Math.random()*3;
+        this.spawnParticle(bx, by, Math.cos(a)*s, Math.sin(a)*s, 0xff8c8c, 2, 0.45);
+      }
+    } else if (b.type === 'heavy') {
+      const v = b.body.velocity;
+      this.matter.body.setVelocity(b.body, { x: v.x * 0.3, y: 16 });
+      b.slamArmed = true;
+      SFX.slam();
+      this.showFloatingText('SLAM!', bx, by - 35, '#dddddd');
+      this.cameras.main.shake(90, 0.006);
+    } else if (b.type === 'speedy') {
+      const v = b.body.velocity;
+      const mag = Math.max(0.001, Math.hypot(v.x, v.y));
+      const newMag = Math.min(35, Math.max(12, mag * 1.8));
+      this.matter.body.setVelocity(b.body, { x: v.x / mag * newMag, y: v.y / mag * newMag });
+      b.dashArmed = true;
+      SFX.dash();
+      this.showFloatingText('DASH!', bx, by - 35, '#ffff66');
+      for (let i = 0; i < 24; i++) {
+        this.spawnParticle(bx, by, -v.x*0.04 + (Math.random()-0.5)*3, -v.y*0.04 + (Math.random()-0.5)*3, 0xffff33, 2, 0.5);
+      }
+    }
+  }
+
+  activatePowerUp(b = this.activeBird) {
+    if (!b || b.puUsed) return;
     b.puUsed = true;
     const bx = b.body.position.x, by = b.body.position.y;
     if (b.pu === 'bomb') {
@@ -1461,9 +1594,13 @@ class GameScene extends Phaser.Scene {
       this.explode(bx, by, 130, 200);
       // bird disappears
       this.destroyBird(b);
-      this.activeBird = null;
-      this.flying = false;
-      this.scheduleNextShot();
+      this.removeProjectile(b);
+      if (this.activeBird === b) this.activeBird = null;
+      if (this.projectiles.length === 0 && this.launched && this.flying) {
+        this.flying = false;
+        SFX.droneDuck(0);
+        if (!this.transitionLock) this.scheduleNextShot();
+      }
     } else if (b.pu === 'ice') {
       SFX.icePU();
       this.frozen = true;
@@ -1624,10 +1761,21 @@ class GameScene extends Phaser.Scene {
         const bird = a.label === 'bird' ? ga : gb;
         const other = a.label === 'bird' ? b : a;
         const otherObj = a.label === 'bird' ? gb : ga;
+        const isTarget = other.label === 'block' || other.label === 'tnt' || other.label === 'pig';
+        if (bird && bird.slamArmed) {
+          bird.slamArmed = false;
+          this.cameras.main.shake(200, 0.015);
+          this.explode(bird.body.position.x, bird.body.position.y, 80, 120);
+        }
+        const dashMult = bird && bird.dashArmed && isTarget ? 1.5 : 1;
         if (other.label === 'block' || other.label === 'tnt') {
-          this.damageBlock(otherObj, impact * 6 * (bird.damageMult || 1));
+          this.damageBlock(otherObj, impact * 6 * (bird.damageMult || 1) * dashMult);
+          if (impact > 1.4) this.cameras.main.shake(120, 0.006);
+          if (bird && bird.dashArmed) bird.dashArmed = false;
         } else if (other.label === 'pig') {
-          this.damagePig(otherObj, impact * 8 * (bird.damageMult || 1));
+          this.damagePig(otherObj, impact * 8 * (bird.damageMult || 1) * dashMult);
+          if (impact > 1.2) this.cameras.main.shake(120, 0.006);
+          if (bird && bird.dashArmed) bird.dashArmed = false;
         } else if (other.label === 'ground') {
           if (impact > 1) SFX.thud();
         }
@@ -1783,6 +1931,12 @@ class GameScene extends Phaser.Scene {
   }
 
   // ---------- Bird life cycle ----------
+  removeProjectile(bird) {
+    if (!this.projectiles) return;
+    const idx = this.projectiles.indexOf(bird);
+    if (idx >= 0) this.projectiles.splice(idx, 1);
+  }
+
   destroyBird(bird) {
     if (bird.body) {
       this.matter.world.remove(bird.body);
@@ -1914,54 +2068,69 @@ class GameScene extends Phaser.Scene {
       }
     }
 
-    // Bird in flight
-    if (this.activeBird && this.activeBird.body && this.activeBird.state === 'flying') {
-      const b = this.activeBird;
-      b.gfx.x = b.body.position.x;
-      b.gfx.y = b.body.position.y;
-      // rotate to velocity
-      const v = b.body.velocity;
-      const sp = Math.hypot(v.x, v.y);
-      if (sp > 0.5) {
-        b.gfx.rotation = Math.atan2(v.y, v.x);
-      } else {
-        b.gfx.rotation += 0.05;
+    // Birds in flight (multi-projectile support for split shots)
+    if (this.projectiles.length > 0) {
+      let camX = 0, camY = 0, camCount = 0;
+      for (let i = this.projectiles.length - 1; i >= 0; i--) {
+        const b = this.projectiles[i];
+        if (!b || !b.body || b.state !== 'flying') {
+          this.projectiles.splice(i, 1);
+          continue;
+        }
+        b.gfx.x = b.body.position.x;
+        b.gfx.y = b.body.position.y;
+        const v = b.body.velocity;
+        const sp = Math.hypot(v.x, v.y);
+        if (sp > 0.5) {
+          b.gfx.rotation = Math.atan2(v.y, v.x);
+        } else {
+          b.gfx.rotation += 0.05;
+        }
+        b.trailTimer -= delta;
+        const trailEvery = b.dashArmed ? 16 : 40;
+        if (b.trailTimer <= 0) {
+          b.trailTimer = trailEvery;
+          const col = b.dashArmed ? 0xffff33 : b.pu === 'bomb' ? 0x666666 : b.pu === 'ice' ? 0xaaddff : b.pu === 'wind' ? 0xffffff : b.pu === 'speed' ? 0xffff00 : 0xffd166;
+          const size = b.dashArmed ? 4 : 3;
+          const life = b.dashArmed ? 0.55 : 0.4;
+          this.spawnParticle(b.gfx.x, b.gfx.y, -v.x*0.05, -v.y*0.05, col, size, life);
+          if (b.dashArmed) {
+            this.spawnParticle(b.gfx.x - v.x*0.8, b.gfx.y - v.y*0.8, -v.x*0.03, -v.y*0.03, 0xffffff, 2, 0.35);
+          }
+        }
+        camX += b.gfx.x; camY += b.gfx.y; camCount++;
+
+        let remove = false;
+        if (sp < 0.3 && b.body.position.y > GROUND_Y - 40) {
+          b.stopFrames = (b.stopFrames || 0) + 1;
+          if (b.stopFrames > 40) remove = true;
+        } else {
+          b.stopFrames = 0;
+        }
+        if (b.body && (b.body.position.y > GROUND_Y + 200 || b.body.position.x > GAME_W + 100 || b.body.position.x < -100)) {
+          remove = true;
+        }
+        if (remove) {
+          this.destroyBird(b);
+          this.projectiles.splice(i, 1);
+          if (this.activeBird === b) this.activeBird = null;
+        }
       }
-      // Trail
-      b.trailTimer -= delta;
-      if (b.trailTimer <= 0) {
-        b.trailTimer = 40;
-        const col = b.pu === 'bomb' ? 0x666666 : b.pu === 'ice' ? 0xaaddff : b.pu === 'wind' ? 0xffffff : b.pu === 'speed' ? 0xffff00 : 0xffd166;
-        this.spawnParticle(b.gfx.x, b.gfx.y, -v.x*0.05, -v.y*0.05, col, 3, 0.4);
-      }
-      // Camera follow
-      if (this.cameraFollowing) {
-        const targetX = Math.max(0, Math.min(GAME_W - this.cameras.main.width, b.gfx.x - this.cameras.main.width/2));
-        const targetY = Math.max(0, Math.min(GAME_H - this.cameras.main.height, b.gfx.y - this.cameras.main.height/2 - 50));
+
+      if (this.cameraFollowing && camCount > 0) {
+        const avgX = camX / camCount;
+        const avgY = camY / camCount;
+        const targetX = Math.max(0, Math.min(GAME_W - this.cameras.main.width, avgX - this.cameras.main.width/2));
+        const targetY = Math.max(0, Math.min(GAME_H - this.cameras.main.height, avgY - this.cameras.main.height/2 - 50));
         this.cameras.main.scrollX += (targetX - this.cameras.main.scrollX) * 0.08;
         this.cameras.main.scrollY += (targetY - this.cameras.main.scrollY) * 0.08;
       }
-      // Stopped detection
-      if (sp < 0.3 && b.body.position.y > GROUND_Y - 40) {
-        b.stopFrames = (b.stopFrames || 0) + 1;
-        if (b.stopFrames > 40) {
-          this.destroyBird(b);
-          this.activeBird = null;
-          this.flying = false;
-          SFX.droneDuck(0);
-          this.scheduleNextShot();
-        }
-      } else {
-        b.stopFrames = 0;
-      }
-      // Off screen check (below or way off)
-      if (b.body.position.y > GROUND_Y + 200 || b.body.position.x > GAME_W + 100 || b.body.position.x < -100) {
-        this.destroyBird(b);
-        this.activeBird = null;
-        this.flying = false;
-        SFX.droneDuck(0);
-        this.scheduleNextShot();
-      }
+    }
+
+    if (this.projectiles.length === 0 && this.launched && this.flying) {
+      this.flying = false;
+      SFX.droneDuck(0);
+      if (!this.transitionLock) this.scheduleNextShot();
     }
 
     // Zoom interpolation when pulling
