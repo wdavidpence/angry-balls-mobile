@@ -1968,6 +1968,8 @@ class GameScene extends Phaser.Scene {
     blk.body = null;
     blk.hp = 0;
     this.wakeBodiesAround(x, y);
+    // chain-reaction nudge for stacked collapse realism
+    this.time.delayedCall(80, () => this.wakeBodiesAround(x, y, 280));
     // Remove from array
     const idx = this.blocks.indexOf(blk);
     if (idx >= 0) this.blocks.splice(idx, 1);
