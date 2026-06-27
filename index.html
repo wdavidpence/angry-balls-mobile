@@ -1790,8 +1790,8 @@ class GameScene extends Phaser.Scene {
       x += vxi * dt * 6;
       y += vyi * dt * 6;
       if (y > GROUND_Y - 5) break;
-      if (i % 2 === 0) {
-        this.trajGfx.fillCircle(x, y, 3 - i*0.04);
+      if (i % 1 === 0) {  // denser dots (classic Angry Birds style)
+        this.trajGfx.fillCircle(x, y, 2.5 - i*0.03);
       }
     }
   }
@@ -1847,13 +1847,92 @@ class GameScene extends Phaser.Scene {
       body.sleepCounter = 0;
       const dist = Math.sqrt(distSq) || 1;
       const pull = 1 - (dist / radius);
+      // Stronger downward kick to override gravity settling
+      const downForce = pull * 0.006;
+      // Lateral push away from destruction point (toppling effect)
+      const lateralForce = pull * 0.0025;
+      // Random bias so structures don't collapse symmetrically
+      const randomBias = (Math.random() - 0.5) * 0.001;
       this.matter.body.applyForce(body, body.position, {
-        x: (dx / dist) * pull * 0.0018,
-        y: (dy / dist) * pull * 0.0018 - pull * 0.0032
+        x: (dx / dist) * lateralForce + randomBias,
+        y: downForce
       });
+      // Apply rotational torque for toppling
+      if (body.angularVelocity === 0) {
+        body.angularVelocity = (Math.random() - 0.5) * pull * 0.04;
+      }
     };
     this.blocks.forEach(b => { if (b.body) wake(b.body); });
     this.pigs.forEach(p => { if (p.body) wake(p.body); });
+  }
+
+  // Chain-reaction cascade: wake nearby bodies in staggered waves
+  // so the collapse propagates naturally like a real structure falling
+  cascadeCollapse(x, y, radius = 300, depth = 0) {
+    if (depth > 3) return; // prevent infinite recursion
+    const radiusSq = radius * radius;
+    const staggerDelay = 40 + depth * 35; // each wave slightly later
+
+    const wakeWave = (delay) => {
+      setTimeout(() => {
+        let anyWoken = false;
+        const allBodies = [
+          ...this.blocks.filter(b => b.body).map(b => b.body),
+          ...this.pigs.filter(p => p.body).map(p => p.body)
+        ];
+        for (const body of allBodies) {
+          if (!body) continue;
+          const dx = body.position.x - x;
+          const dy = body.position.y - y;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > radiusSq) continue;
+          if (body.isSleeping) continue;
+          body.isSleeping = false;
+          body.sleepCounter = 0;
+          const dist = Math.sqrt(distSq) || 1;
+          const pull = 1 - (dist / radius);
+          // Strong downward + outward force
+          const downForce = pull * 0.008;
+          const outward = pull * 0.003;
+          const bias = (Math.random() - 0.5) * 0.0015;
+          this.matter.body.applyForce(body, body.position, {
+            x: (dx / dist) * outward + bias,
+            y: downForce
+          });
+          // Toppling rotation
+          if (Math.abs(body.angularVelocity) < 0.01) {
+            body.angularVelocity = (Math.random() - 0.5) * pull * 0.06;
+          }
+          anyWoken = true;
+        }
+        // If we woke something, cascade to neighbors
+        if (anyWoken && depth < 3) {
+          // Find the furthest woken body and cascade from there
+          let furthest = null;
+          let furthestDist = 0;
+          for (const body of allBodies) {
+            if (!body) continue;
+            const dx = body.position.x - x;
+            const dy = body.position.y - y;
+            const d = Math.hypot(dx, dy);
+            if (d < radius && d > furthestDist) {
+              furthestDist = d;
+              furthest = body;
+            }
+          }
+          if (furthest) {
+            this.cascadeCollapse(furthest.position.x, furthest.position.y, radius * 0.7, depth + 1);
+          }
+        }
+      }, delay);
+    };
+
+    // Immediate strong wake at center
+    wakeWave(0);
+    // Secondary wave
+    wakeWave(staggerDelay);
+    // Tertiary wave for outer bodies
+    wakeWave(staggerDelay * 2);
   }
 
   updateParticles(dt) {
@@ -1967,9 +2046,8 @@ class GameScene extends Phaser.Scene {
     blk.gfx.destroy();
     blk.body = null;
     blk.hp = 0;
-    this.wakeBodiesAround(x, y);
-    // chain-reaction nudge for stacked collapse realism
-    this.time.delayedCall(80, () => this.wakeBodiesAround(x, y, 280));
+    // Use cascade collapse for realistic chain-reaction
+    this.cascadeCollapse(x, y, 350);
     // Remove from array
     const idx = this.blocks.indexOf(blk);
     if (idx >= 0) this.blocks.splice(idx, 1);
